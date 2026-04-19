@@ -1,0 +1,6 @@
+# Heavy ML deps — installed only in the pipeline container / host, not the API image.
+-r requirements.txt
+ultralytics==8.3.27
+supervision==0.23.0
+torch==2.4.1
+torchvision==0.19.1
