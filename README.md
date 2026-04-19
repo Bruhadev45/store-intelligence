@@ -9,18 +9,38 @@ terminal dashboard** for live monitoring.
 
 ---
 
+## Prerequisites
+
+| Dependency       | Why                                                |
+|------------------|----------------------------------------------------|
+| Docker ≥ 24      | Runs the API + Postgres stack                      |
+| Python 3.11+     | Host-side CV pipeline (not in API image)           |
+| ~2 GB free disk  | Docker images + Postgres volume + model weights    |
+| `CCTV Footage/`  | Directory of `CAM *.mp4` clips, beside the repo    |
+
+**Model weights**: the first run of `pipeline/detect.py` will auto-download
+`rtdetr-l.pt` (~66 MB) from Ultralytics' CDN into the current working
+directory. No manual download needed; just have internet on first run.
+
+**CCTV clips**: place the footage the challenge drop gave you at
+`../CCTV Footage/` (sibling of the repo root) — `pipeline/run.sh` globs
+`../CCTV Footage/CAM*.mp4`. Override the location with `CCTV_DIR=/path
+bash pipeline/run.sh`.
+
 ## Quickstart (5 commands)
 
 ```bash
-cd "store-intelligence"
-docker compose up -d --build
-curl -s http://localhost:8000/health | jq
-bash pipeline/run.sh       # requires Python + pipeline deps on host (see below)
-python dashboard/live.py --store STORE_001
+git clone https://github.com/Bruhadev45/store-intelligence.git && cd store-intelligence
+docker compose up -d --build                                         # API + Postgres
+python -m venv .venv && source .venv/bin/activate && pip install -r requirements-pipeline.txt
+bash pipeline/run.sh                                                 # emit events from CCTV clips
+curl -s http://localhost:8000/stores/STORE_001/metrics | jq          # see live metrics
 ```
 
 The API is usable the moment `docker compose up` is healthy — endpoints return
-empty-but-valid JSON even before the pipeline runs.
+empty-but-valid JSON even before the pipeline runs. For the live dashboard,
+open <http://localhost:8000/> in a browser, or run
+`python dashboard/live.py --store STORE_001` from a terminal.
 
 ## Architecture
 
@@ -82,8 +102,9 @@ This will:
 pytest --cov=app --cov-report=term
 ```
 
-Coverage target: **≥70%**. Tests use SQLite-async for isolation (can be
-switched to Postgres testcontainers via env var).
+Coverage target: **≥70%** (brief requirement). Current: **84%** over `app/`
+and `pipeline/` (32 tests, all async-SQLite for hermetic isolation). Swap
+to Postgres-backed tests with `DATABASE_URL=postgresql+asyncpg://...`.
 
 ## Documentation
 

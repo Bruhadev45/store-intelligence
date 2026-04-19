@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Wait for Postgres if configured.
+# Wait for Postgres if configured. compose's depends_on: service_healthy
+# already gates us, this is belt-and-braces for `docker run` usage.
 if [[ "${DATABASE_URL:-}" == *"@db:"* ]]; then
     echo "[entrypoint] waiting for postgres..."
     for i in $(seq 1 30); do
-        python -c "import asyncio,asyncpg,os; url=os.environ['DATABASE_URL'].replace('postgresql+asyncpg://','postgresql://'); asyncio.run(asyncpg.connect(url).close() if False else (lambda: None)())" 2>/dev/null && break || true
-        python - <<'PY' && break || sleep 2
+        if python - <<'PY' 2>/dev/null
 import asyncio, os, asyncpg
 url = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
 async def main():
@@ -14,10 +14,18 @@ async def main():
     await conn.close()
 asyncio.run(main())
 PY
+        then
+            echo "[entrypoint] postgres reachable"
+            break
+        fi
+        sleep 2
     done
 fi
 
-# Run alembic upgrade, falling back to SQLAlchemy create_all (belt-and-braces).
-alembic -c /app/config/alembic.ini upgrade head || echo "[entrypoint] alembic skipped (create_all will cover)"
+# Run alembic upgrade. create_all in app.main.lifespan covers the fallback
+# for the SQLite smoke-test path where alembic is overkill.
+if ! alembic -c /app/config/alembic.ini upgrade head; then
+    echo "[entrypoint] alembic upgrade failed — create_all fallback will run at app startup" >&2
+fi
 
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000

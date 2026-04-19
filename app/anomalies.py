@@ -31,6 +31,7 @@ async def detect_anomalies(store_id: str, now: datetime | None = None) -> list[d
                         e.store_id == store_id,
                         e.event_type == "BILLING_QUEUE_JOIN",
                         e.timestamp >= spike_cutoff,
+                        e.is_staff.is_(False),
                     )
                 )
             )

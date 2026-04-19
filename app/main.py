@@ -62,8 +62,11 @@ if _DASHBOARD_DIR.is_dir():
 
 
 @app.get("/health")
-async def health() -> dict[str, Any]:
-    return await health_snapshot()
+async def health() -> JSONResponse:
+    snap = await health_snapshot()
+    # Brief: "DB unavailable → 503 with structured body".
+    status_code = 503 if snap.get("database") != "ok" else 200
+    return JSONResponse(status_code=status_code, content=snap)
 
 
 @app.post("/events/ingest")

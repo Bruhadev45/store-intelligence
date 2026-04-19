@@ -79,42 +79,85 @@ NOTHING` means every pipeline retry is safe.
 
 ---
 
-## 3. POS data — **synthesised, seeded, documented** over faked-inline
+## 3. API architecture — **idempotent batch ingest with partial-success envelope**
 
-**The issue**
-The brief's expected input set implies a `pos_transactions.csv` exists
-in the drop. It doesn't. Three options:
-- **Skip POS entirely** — would render `/funnel` Purchase stage
-  meaningless and conversion_rate unusable.
-- **Hard-code a tiny CSV** (LLM's first suggestion) — "throw in 20 rows
-  and move on". Hides the assumption from reviewers.
-- **Synthesise transparently, with a seed, and document** (chosen).
+**The decision**
+How should `POST /events/ingest` behave when a batch of 500 events mixes
+good rows, duplicates (retried from the pipeline), and a handful of
+invalid rows?
+
+**Options considered**
+- **All-or-nothing (reject the whole batch on any error)** — LLM's first
+  suggestion. Simplest to reason about; forces the client to retry after
+  fixing bad rows. The pipeline (a long-running CV worker) has no easy
+  way to "fix" one malformed row, so this pattern risks losing hundreds
+  of valid events because of a single bad timestamp.
+- **Best-effort (silently drop bad rows, return 200)** — low-friction but
+  opaque. The client never learns that rows were dropped; data loss is
+  silent and permanent.
+- **Partial-success envelope with per-row errors** (chosen) — accept the
+  valid subset, return a structured report of what was accepted, what
+  was a duplicate, and what was rejected (with reasons), and signal this
+  with HTTP 207 Multi-Status.
 
 **What AI initially suggested**
-A one-liner: `pd.DataFrame([{"txn": "TXN1", ...}, ...]).to_csv(...)`.
-This would ship a mystery CSV into the repo with no explanation of
-where the rows came from.
+The first draft was all-or-nothing: "validate the whole batch with
+`IngestBatch.model_validate()`, raise 422 on any error". Clean Python,
+but wrong semantics for a retail-CV pipeline that can't stop and fix
+one frame.
 
 **What we chose and why**
-`pipeline/synth_pos.py` reads the actual `BILLING_QUEUE_LEAVE` events
-emitted by the CV pipeline and, for each, rolls a seeded RNG (seeded by
-`sha256(master_seed + event_id)`) to decide whether that visitor
-converted (p = 0.45 by default). Basket value is log-normal(μ=6.8,
-σ=0.6) (≈ ₹900 median, realistic for Purplle), items_count is geometric.
+`POST /events/ingest` validates each event independently inside
+`app/ingestion.py`. The response envelope has three arrays:
+`{accepted: [...], duplicates: [...], rejected: [{event_id, reason}]}`.
+Status code is **200** on a fully-clean batch and **207** when any row
+was rejected. `413` is returned only for batches above the hard limit
+(`BATCH_MAX_EVENTS=500`, matching the brief).
 
-Because the seed is deterministic, two developers who run the pipeline
-on the same footage get the same POS rows — reproducibility without
-committing a "secret" CSV.
+Idempotency is layered into the same handler. Events carry a
+client-generated `event_id` (UUID v4) that is the **primary key** of the
+`events` table. Writes use `ON CONFLICT (event_id) DO NOTHING` on both
+Postgres and SQLite. Duplicate POSTs — which the pipeline *will* make,
+because the CV worker flushes its buffer on SIGTERM without knowing
+which rows the API already accepted — are safely dropped at the
+database level, and the response reports them in `duplicates[]` so the
+client sees they weren't lost, they were already there.
 
-This **exposes the assumption explicitly** to any reviewer: conversion
-rates are grounded on synthetic POS, but the coupling between billing
-exits and POS rows is realistic (only people who queued get billed, with
-a 30-180 s delay).
+This combines three brief requirements into one coherent contract:
+- "Idempotent by event_id" — PK + ON CONFLICT.
+- "Partial success on malformed events" — per-row validation + 207.
+- "Structured error response" — every rejected row names the offending
+  field, never a stack trace.
 
 **Trade-offs accepted**
-- If a real POS file ever lands, synth_pos.py becomes dead. Acceptable —
-  it's replaceable in <10 lines.
-- Reviewer needs to read this section to understand where POS came from.
-  That's the *point* — transparency over convenience.
+- The handler can't use Pydantic's batch model (`IngestBatch`) directly
+  to benefit from a single `model_validate` call; instead each row is
+  validated in a loop. Cost: ~3% handler latency at batch size 500.
+  Benefit: we keep the 497 good rows when 3 are bad.
+- Clients must be prepared for a 207 response. The default `httpx`
+  status check (`raise_for_status`) treats 2xx as success, so no
+  additional client logic is required — but `207` must be interpreted
+  correctly if a client refuses anything non-200.
 
-(Word count: ~700.)
+**Why not just return 200 always?**
+Because silent data loss is a design smell. The response body is the
+audit trail. If the pipeline ever drifts from the schema, the operator
+sees the rejections immediately in API logs, not three hours later when
+the funnel numbers look wrong.
+
+---
+
+## Appendix — POS data synthesis
+
+The brief's input set implies a `pos_transactions.csv`; none was
+provided in our drop. Rather than ship an opaque hand-written CSV,
+`pipeline/synth_pos.py` walks the `BILLING_QUEUE_LEAVE` events emitted
+by the CV pipeline and, for each, rolls a seeded RNG
+(`sha256(master_seed + event_id)`) to decide whether that visitor
+converted (p = 0.45) and at what basket value (log-normal, ~₹900
+median). The seed is deterministic, so two developers running against
+the same footage get identical POS rows. This is pipeline/dataset
+tooling rather than an API-contract decision, so it is documented here
+instead of as one of the three primary choices above.
+
+(Word count: ~820.)

@@ -67,9 +67,12 @@ async def compute_funnel(store_id: str, now: datetime | None = None) -> dict[str
     pos_visitors = {r[0] for r in pos_rows if r[0]}
     purchasers = billing_visitors & pos_visitors
 
-    # Funnel monotonicity: each subsequent stage is a subset of the prior.
+    # Funnel monotonicity: a visitor in a later stage must have entered the store.
+    # ZoneVisit and BillingQueue are siblings (ZONE_ENTER isn't a hard prerequisite
+    # for joining a billing queue — a customer may head straight to checkout), so
+    # each is clamped to the Entry set independently rather than chained.
     zone_visitors &= entries
-    billing_visitors &= zone_visitors if zone_visitors else entries
+    billing_visitors &= entries
     purchasers &= billing_visitors
 
     counts = [

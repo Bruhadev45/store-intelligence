@@ -3,9 +3,16 @@ __pycache__
 *.pyc
 data/*.jsonl
 data/*.csv
+data/*.db
+data/*.log
+*.pt
 tests
 docs
 .git
+.gitignore
+.dockerignore
 .pytest_cache
+.mypy_cache
 .coverage
 htmlcov
+.DS_Store

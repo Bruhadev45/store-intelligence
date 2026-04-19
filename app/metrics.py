@@ -138,6 +138,7 @@ async def compute_store_metrics(store_id: str, now: datetime | None = None) -> S
                 e.store_id == store_id,
                 e.timestamp >= cutoff,
                 e.event_type == "BILLING_QUEUE_JOIN",
+                e.is_staff.is_(False),
             )
         )
         rows = (await s.execute(q_metadata_q)).all()

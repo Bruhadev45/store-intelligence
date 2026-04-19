@@ -17,12 +17,16 @@ RUN pip install -r requirements.txt
 
 COPY app /app/app
 COPY config /app/config
+COPY dashboard /app/dashboard
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh && chown -R apex:apex /app
 
 USER apex
 
-ENV DATABASE_URL=postgresql+asyncpg://apex:apex@db:5432/apex
+# DATABASE_URL is supplied by docker-compose (or `docker run -e`).
+# A credential-free default is used only so the image is runnable without
+# compose for `--help` / smoke tests; production must override.
+ENV DATABASE_URL=sqlite+aiosqlite:////app/data/apex.db
 
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --retries=6 CMD curl -fsS http://localhost:8000/health || exit 1

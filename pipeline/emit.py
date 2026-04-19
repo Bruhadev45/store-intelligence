@@ -61,8 +61,22 @@ class Emitter:
         self._http = httpx.Client(timeout=config.timeout_sec) if config.api_url else None
         self._posted = 0
         self._written = 0
+        # Per-visitor event ordinal — injected into metadata.session_seq
+        self._session_seq: dict[str, int] = {}
 
     def emit(self, event: dict[str, Any]) -> None:
+        # Stamp session_seq (ordinal position of this event in the visitor session).
+        vid = event.get("visitor_id")
+        if vid:
+            self._session_seq[vid] = self._session_seq.get(vid, 0) + 1
+            meta = event.setdefault("metadata", {}) or {}
+            if not isinstance(meta, dict):
+                meta = {}
+                event["metadata"] = meta
+            meta.setdefault("session_seq", self._session_seq[vid])
+            # On EXIT, drop the counter so a REENTRY restarts at 1.
+            if event.get("event_type") == "EXIT":
+                self._session_seq.pop(vid, None)
         self._buffer.append(event)
         if self._jsonl_fh:
             self._jsonl_fh.write(json.dumps(event) + "\n")

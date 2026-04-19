@@ -2,18 +2,20 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: apex
-      POSTGRES_PASSWORD: apex
-      POSTGRES_DB: apex
+      POSTGRES_USER: ${POSTGRES_USER:-apex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apex}
+      POSTGRES_DB: ${POSTGRES_DB:-apex}
     volumes:
       - apex_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U apex -d apex"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apex} -d ${POSTGRES_DB:-apex}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    # Bound to loopback so the demo database is not reachable from the LAN.
+    # Remove the host prefix if you need to connect from another host.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   api:
     build: .
@@ -21,12 +23,17 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://apex:apex@db:5432/apex
-      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-apex}:${POSTGRES_PASSWORD:-apex}@db:5432/${POSTGRES_DB:-apex}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
 
 volumes:
   apex_pgdata:
