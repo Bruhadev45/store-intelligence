@@ -1,14 +1,17 @@
 services:
   db:
     image: postgres:16-alpine
+    # All credentials come from .env (see .env.example). compose will refuse
+    # to start if any of POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB is
+    # unset, so there are no secrets committed to the repo.
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apex}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apex}
-      POSTGRES_DB: ${POSTGRES_DB:-apex}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env (see .env.example)}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env (see .env.example)}
     volumes:
       - apex_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apex} -d ${POSTGRES_DB:-apex}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -23,7 +26,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-apex}:${POSTGRES_PASSWORD:-apex}@db:5432/${POSTGRES_DB:-apex}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"

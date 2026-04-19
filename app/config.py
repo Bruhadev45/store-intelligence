@@ -19,7 +19,10 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        default_db = "postgresql+asyncpg://apex:apex@db:5432/apex"
+        # No credentialed default: if DATABASE_URL is unset, fall back to a
+        # local SQLite file so tests and ad-hoc runs work without exposing
+        # a password in source. docker-compose always injects DATABASE_URL.
+        default_db = "sqlite+aiosqlite:///./data/apex.db"
         return cls(
             database_url=os.getenv("DATABASE_URL", default_db),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
